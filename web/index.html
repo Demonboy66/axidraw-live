@@ -1,0 +1,244 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AxiDraw Live</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header id="toolbar">
+  <div class="group">
+    <button data-tool="pen" class="tool active" title="Draw (P)">✎ Pen</button>
+    <button data-tool="eraser" class="tool" title="Erase whole strokes (E)">⌫ Eraser</button>
+    <button data-tool="move" class="tool" title="Drag the selected layer (arrow keys nudge it). Shift-drag moves the whole drawing. (M)">✥ Move</button>
+    <button data-tool="shape" class="tool" title="Drag out lines and shapes, drawn with the layer's brush. Shift: square / circle / 15° lines. Option: from the centre. (S)">◇ Shape</button>
+  </div>
+  <div class="group" title="Steadies your hand: the line is pulled along behind the stylus on a short string, so wobbles don't reach it">
+    <label class="inline">Smoothing <input type="range" id="smoothing" min="0" max="100" step="5" value="0"></label>
+    <span id="smoothing-value">off</span>
+  </div>
+  <div class="group">
+    <button id="undo" title="Undo (⌘Z)">↶ Undo</button>
+    <button id="redo" title="Redo (⇧⌘Z)">↷ Redo</button>
+  </div>
+  <div class="group">
+    <button id="zoom-out" title="Zoom out (-)">−</button>
+    <button id="fit" title="Fit the paper in the window (0)">Fit</button>
+    <button id="zoom-in" title="Zoom in (+)">+</button>
+    <button id="rotate-left" title="Turn the view 15° anticlockwise (Shift R) - doesn't change the drawing or the plot">⟲</button>
+    <button id="rotation" title="View turned by this much - click to straighten (5). Space + Option drag turns it freely.">0°</button>
+    <button id="rotate-right" title="Turn the view 15° clockwise (R) - doesn't change the drawing or the plot">⟳</button>
+    <span id="zoom-level" title="Zoom, relative to the whole page fitting the window">100%</span>
+    <button id="depth-view" title="Colour and thicken strokes by how hard the pen will press (D)">Depth</button>
+    <span id="pressure-meter" title="Stylus pressure"><span id="pressure-bar"></span></span>
+    <span id="pointer-info">—</span>
+  </div>
+  <div class="group right">
+    <button id="save">Save</button>
+    <button id="load">Open…</button>
+    <button id="import-svg" title="Bring in shapes from an SVG file, on a layer of their own">Import SVG…</button>
+    <input type="file" id="svg-file" accept=".svg,image/svg+xml" hidden>
+    <button id="export-svg" title="AxiDraw SVG with +H/+S layer codes, for Inkscape or the AxiDraw CLI">Export SVG</button>
+    <input type="file" id="load-file" accept=".json,application/json" hidden>
+    <input type="file" id="image-file" accept="image/*" hidden>
+  </div>
+</header>
+
+<aside id="left">
+  <section>
+    <h2>Plotter</h2>
+    <div class="row">
+      <button id="connect">Connect</button>
+      <button id="simulate" title="Everything except moving the plotter">Simulate</button>
+      <button id="disconnect">Disconnect</button>
+    </div>
+    <div id="connection" class="status">Not connected</div>
+    <label>Model
+      <select id="model">
+        <option value="1">AxiDraw V2 / V3 / SE/A4</option>
+        <option value="2">AxiDraw V3/A3 / SE/A3</option>
+        <option value="3">AxiDraw V3 XLX</option>
+        <option value="4">AxiDraw MiniKit</option>
+        <option value="5">AxiDraw SE/A1</option>
+        <option value="6">AxiDraw SE/A2</option>
+        <option value="7">AxiDraw V3/B6</option>
+      </select>
+    </label>
+    <label>Pen-lift servo
+      <select id="penlift">
+        <option value="3">Brushless (narrow-band) - newer AxiDraws</option>
+        <option value="2">Standard servo</option>
+        <option value="1">Model default</option>
+      </select>
+    </label>
+  </section>
+
+  <section>
+    <h2>Plotting</h2>
+    <label>Mode
+      <input type="hidden" id="live-mode" value="off">
+      <div class="choices" id="live-mode-choices">
+        <button data-value="off" class="active">Plot later</button>
+        <button data-value="stroke" title="Each stroke is plotted when you lift the stylus">Live: after each stroke</button>
+        <button data-value="stream" title="The plotter follows the stroke while you draw it">Live: follow as I draw</button>
+      </div>
+    </label>
+    <div class="row">
+      <button id="plot-layers" title="Plot every layer that has Plot ticked">Plot Layers</button>
+      <button id="plot-current" title="Plot only the selected layer">Plot Current</button>
+    </div>
+    <label class="check"><input type="checkbox" id="only-unplotted" checked> Only strokes not plotted yet</label>
+    <label class="check"><input type="checkbox" id="optimise-order" checked> Shorten pen-up travel</label>
+    <label class="check" title="Around the cursor: how far the plotter draws in one second. Stay roughly inside it each second and the plotter keeps up. It turns amber, then red, as the plotter falls behind."><input type="checkbox" id="show-pace" checked> Pace ring while drawing live</label>
+    <div class="row">
+      <button id="pause">Pause</button>
+      <button id="resume">Resume</button>
+      <button id="stop" class="danger">Stop</button>
+      <button id="home" title="Lift the pen and go to the home corner">Home</button>
+    </div>
+    <div class="row">
+      <button id="mark-unplotted" title="Forget which strokes were plotted, to plot them again">Mark All Unplotted</button>
+    </div>
+  </section>
+
+  <section>
+    <h2>Speed &amp; Pen</h2>
+    <label title="Inkscape's Writing/drawing speed. Layers use this unless given their own.">Writing/drawing speed <span class="value" data-for="speed_pendown"></span><input type="range" id="speed_pendown" min="1" max="100"></label>
+    <label title="Inkscape's Pen-up movement speed">Pen-up movement speed <span class="value" data-for="speed_penup"></span><input type="range" id="speed_penup" min="1" max="100"></label>
+    <label class="check" title="Draw at a steady speed instead of speeding up and slowing down along each line - more even pencil tone (Inkscape: Use constant speed when pen is down)"><input type="checkbox" id="const-speed"> Constant speed while drawing</label>
+    <label>Acceleration <span class="value" data-for="accel"></span><input type="range" id="accel" min="1" max="100"></label>
+    <label>Lowering rate <span class="value" data-for="pen_rate_lower"></span><input type="range" id="pen_rate_lower" min="1" max="100" title="Slow lowering lands the pencil gently"></label>
+    <label>Raising rate <span class="value" data-for="pen_rate_raise"></span><input type="range" id="pen_rate_raise" min="1" max="100"></label>
+    <label>Delay after lowering <span class="value" data-for="pen_delay_down"></span><input type="range" id="pen_delay_down" min="0" max="1000" step="10"></label>
+    <label title="No pen height the app sends - pen-up, test or drawing - goes above this. With the spring kit, set it just below where the spring is squashed solid. 100 = no limit.">Highest safe height <input type="number" id="height-cap" min="0" max="100" step="1"> <span class="hint">(spring limit, 100 = none)</span></label>
+    <label>Pen-up height <span class="value" data-for="pen_pos_up"></span><input type="range" id="pen_pos_up" min="0" max="100"></label>
+    <p class="hint" id="cap-warning" hidden>Pen-up height is at the safe limit.</p>
+    <div class="row test">
+      <label>Test height <input type="number" id="test-height" min="0" max="100" step="0.5" value="35" title="Arrow keys in the box step by 0.5; type a value like 31.3 for finer"></label>
+      <button id="pen-down">Pen Down</button>
+      <button id="pen-up">Pen Up</button>
+      <button id="use-test-height" title="Make this the selected layer's pen height - its Firm height when pressure is on">Use for Layer</button>
+      <button id="use-test-light" title="Make this the selected layer's Light height - where the tip just touches - for pressure drawing">Use as Light</button>
+    </div>
+    <p class="hint">Heights: lower numbers put the pen lower. Pressure only grows with lower heights between first touch and the point where the lift arm lets go of the pen; below that it stays the same. With the spring kit fitted, never raise Pen-up height until the spring is fully squashed.</p>
+  </section>
+
+  <section>
+    <h2>Paper</h2>
+    <label>Size
+      <select id="paper-preset">
+        <option value="148x210">A5 portrait</option>
+        <option value="210x148">A5 landscape</option>
+        <option value="105x148">A6 portrait</option>
+        <option value="148x105">A6 landscape</option>
+        <option value="210x297">A4 portrait</option>
+        <option value="297x210">A4 landscape</option>
+        <option value="custom">Custom</option>
+      </select>
+    </label>
+    <div class="row">
+      <label>W <input type="number" id="paper-w" min="10" max="900" step="1"> mm</label>
+      <label>H <input type="number" id="paper-h" min="10" max="900" step="1"> mm</label>
+    </div>
+    <div class="row">
+      <label title="Where the paper's top-left corner is, measured from the plotter's home position">Paper at X <input type="number" id="paper-x" step="0.5"> mm</label>
+      <label>Y <input type="number" id="paper-y" step="0.5"> mm</label>
+    </div>
+    <label>Margin <input type="number" id="paper-margin" min="0" max="50" step="0.5"> mm <span class="hint">(nothing is plotted outside it)</span></label>
+  </section>
+
+  <section>
+    <h2>Position the Drawing</h2>
+    <div class="row">
+      <label>X <input type="number" id="place-x" step="0.5"> mm</label>
+      <label>Y <input type="number" id="place-y" step="0.5"> mm</label>
+    </div>
+    <div class="row">
+      <label>Scale <input type="number" id="place-scale" min="1" max="1000" step="1"> %</label>
+      <label>Rotate <input type="number" id="place-rotate" step="1"> °</label>
+    </div>
+    <div class="row">
+      <button id="place-centre" title="Centre the drawing on the paper">Centre</button>
+      <button id="place-reset">Reset</button>
+    </div>
+  </section>
+</aside>
+
+<main id="stage">
+  <canvas id="canvas"></canvas>
+  <div id="tool-options">
+    <span id="eraser-options" hidden title="Eraser width on the paper ([ and ] change it)">
+      <select id="eraser-mode" title="Whole strokes: anything it touches goes (a brush stroke as a group). Only what it touches: cuts out just the part under the eraser.">
+        <option value="whole">Whole strokes</option>
+        <option value="part">Only what it touches</option>
+      </select>
+      <label class="inline">width <input type="number" id="eraser-width" min="0.5" max="50" step="0.5" value="4"> mm</label>
+    </span>
+    <span id="shape-options" hidden>
+      <select id="shape-kind">
+        <option value="line">Line</option>
+        <option value="rect">Rectangle</option>
+        <option value="ellipse">Ellipse</option>
+        <option value="polygon">Polygon</option>
+      </select>
+      <label id="shape-sides-label" hidden>sides <input type="number" id="shape-sides" min="3" max="24" value="6"></label>
+      <span id="shape-brush" class="hint"></span>
+    </span>
+  </div>
+  <div id="import-panel" hidden>
+    <h2 id="import-title">Import SVG</h2>
+    <p class="hint" id="import-summary"></p>
+    <div class="row">
+      <label>Width <input type="number" id="import-width" min="1" max="2000" step="1"> mm</label>
+      <span class="hint" id="import-height"></span>
+    </div>
+    <div class="row">
+      <button id="import-natural" title="The size the SVG file gives">Original size</button>
+      <button id="import-fit" title="As large as fits inside the margin">Fit to paper</button>
+    </div>
+    <label>Pressure <span class="value" id="import-pressure-value">50%</span><input type="range" id="import-pressure" min="0" max="100" step="5" value="50"></label>
+    <label class="check" id="import-brush-label"><input type="checkbox" id="import-brush"> <span id="import-brush-text"></span></label>
+    <div class="row">
+      <button id="import-place" class="primary">Place</button>
+      <button id="import-cancel">Cancel</button>
+    </div>
+  </div>
+  <div id="banner" hidden>
+    <span id="banner-text"></span>
+    <button id="banner-sharpened">Sharpened - Resume</button>
+    <button id="banner-resume">Resume</button>
+  </div>
+</main>
+
+<aside id="right">
+  <section>
+    <h2>Layers</h2>
+    <ul id="layers"></ul>
+    <div class="row">
+      <button id="add-layer">+ Drawing Layer</button>
+      <button id="add-image-layer">+ Image Layer</button>
+    </div>
+    <div class="row">
+      <button id="layer-up" title="Move up">▲</button>
+      <button id="layer-down" title="Move down">▼</button>
+      <button id="layer-duplicate" title="Copy the layer and its strokes, ready to move">Duplicate</button>
+      <button id="layer-delete" class="danger">Delete</button>
+      <button id="layer-clear" title="Remove every stroke from the layer">Clear</button>
+    </div>
+  </section>
+  <section id="layer-props"></section>
+</aside>
+
+<footer id="statusbar">
+  <span id="status-queue"></span>
+  <span id="status-lag"></span>
+  <span id="status-drawn"></span>
+  <span id="status-sharpen"></span>
+  <span id="status-error" class="error"></span>
+</footer>
+
+<script src="brushes.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
