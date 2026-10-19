@@ -202,9 +202,9 @@ function sendInOrder(path, body) {
 
 // A message from the app itself, kept up for a few seconds before server errors can replace it
 let noticeUntil = 0;
-function notice(message) {
+function notice(message, ms = 4000) {
   $('status-error').textContent = message;
-  noticeUntil = Date.now() + 4000;
+  noticeUntil = Date.now() + ms;
 }
 
 function sharpenAllowances() {
@@ -323,7 +323,10 @@ function plotLayers(layers) {
     for (const stroke of layer.strokes) if (!onlyNew || (!stroke.plotted && !queued.has(stroke))) entries.push({ layer, stroke });
   }
   if (!entries.length) { notice('Nothing to plot.'); return; }
-  plotStrokes(entries, $('optimise-order').checked);
+  plotStrokes(entries, $('optimise-order').checked).then(() => {
+    // Like Inkscape: park in the home corner once everything sent has been drawn (queued after the strokes)
+    if ($('return-home').checked && status.connected) sendInOrder('home', {});
+  });
 }
 
 // ---------- View ----------
@@ -1835,6 +1838,8 @@ async function connect(simulate) {
   await api('settings', { settings: doc.settings, heightCap: heightCap(), sharpenEvery: sharpenAllowances() }); // So it connects with them
   await api('connect', { simulate });
   setTimeout(async () => onStatus(await (await fetch('/api/status')).json()), 300);
+  // The AxiDraw can't sense where it is: wherever the carriage sits now counts as home
+  if (!simulate) notice('Connected - the carriage\'s current position now counts as home (0, 0). If it wasn\'t in the home corner, Disconnect, push it there, and Connect again.', 12000);
 }
 $('connect').addEventListener('click', () => connect(false));
 $('simulate').addEventListener('click', () => connect(true));
@@ -1879,6 +1884,8 @@ document.querySelectorAll('#live-mode-choices button').forEach((b) => b.addEvent
   renderLayerProps();
 }));
 $('show-pace').addEventListener('change', () => { needsFrame = true; });
+$('return-home').checked = doc.returnHome !== false;
+$('return-home').addEventListener('change', () => { doc.returnHome = $('return-home').checked; scheduleAutosave(); });
 $('mark-unplotted').addEventListener('click', () => {
   for (const l of doc.layers) if (l.kind === 'draw') for (const s of l.strokes) s.plotted = false;
   changed(true);
@@ -1994,6 +2001,7 @@ function loadDocument(data) {
   doc.speedFollowsSetting = true;
   if (!layerById(doc.selected)) doc.selected = doc.layers[0].id;
   pending.clear();
+  $('return-home').checked = doc.returnHome !== false;
   syncSettingInputs(); syncPaperInputs(); syncSmoothing(); fit(); changed(true); sendSettings();
 }
 

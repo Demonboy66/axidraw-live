@@ -147,6 +147,10 @@ what will plot. "Follow as I draw" uses the plain pen — brush strokes plot whe
 - Following as you draw is slower than whole strokes: the plotter stops briefly at each point it's sent (points go about
   every 1 mm). Whole strokes (after each stroke, or plot later) are planned as one smooth path and run much faster.
 - **Pause / Resume / Stop / Home**. Stop drops everything queued and lifts the pen.
+- **Return home after plotting** (on by default): after Plot Layers or Plot Current, the carriage parks in the home
+  corner, as in Inkscape. Live drawing doesn't return between strokes.
+- **Home position:** the AxiDraw can't sense where it is — when you **Connect**, wherever the carriage sits counts as
+  home (0, 0). Put it in the home corner before connecting; **Disconnect** returns it home and releases the motors.
 
 ### Plot order
 
