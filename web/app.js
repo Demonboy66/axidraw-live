@@ -1014,7 +1014,15 @@ function startStroke(layer, pos, pressure) {
   drawing = { layer, pts: [[x, y, pressure]], id, token: sendToken(id), started: performance.now(), stream: null, lazy: [x, y] };
   // Following as you draw works for the plain pen; other brushes plot when the stroke is finished
   const plainPen = !layer.brush || layer.brush.type === 'pen';
-  if ($('live-mode').value === 'stream' && status.connected && layer.plot && plainPen) drawing.stream = { begun: false, sent: 0, lastFlush: 0 };
+  if ($('live-mode').value === 'stream' && status.connected && layer.plot && plainPen) {
+    const d = drawing;
+    d.stream = { begun: false, sent: 0, lastFlush: 0 };
+    // While the stylus is held still, keep telling the server the stroke is alive - it lifts the pen if a live
+    // stroke stops arriving (a closed tab mustn't leave the pen down on the paper)
+    d.stream.heartbeat = setInterval(() => {
+      if (drawing === d && d.stream.begun) sendInOrder('stream', { phase: 'extend', id: d.token, points: [] });
+    }, 1000);
+  }
 }
 // Smoothing works like a string: the line is pulled along behind the stylus by a string up to 4 mm long, so small
 // wobbles never reach it. 0 = the line follows the stylus exactly.
@@ -1093,6 +1101,7 @@ function updateShape(pos, e) {
 function finishStroke(allowDot) {
   const d = drawing;
   drawing = null;
+  if (d.stream) clearInterval(d.stream.heartbeat);
   let pts = d.pts;
   if (d.shape && polylineLength(pts) < 0.3 / placementScale()) return; // A click without a drag makes no shape
   // With smoothing, the line trails the stylus on its string - when you lift, it finishes where the stylus was
@@ -1103,6 +1112,7 @@ function finishStroke(allowDot) {
   if (pts.length === 1 && !allowDot && !(d.stream && d.stream.begun)) return; // Only touched the edge
   if (pts.length === 1) pts = [pts[0], [pts[0][0] + 0.3 / placementScale(), pts[0][1], pts[0][2]]]; // A tap makes a dot
   if (d.stream) {
+    clearInterval(d.stream.heartbeat);
     d.pts = pts;
     streamProgress(d, true);
   }
@@ -1447,6 +1457,12 @@ function renderLayerProps() {
     field(row, 'Light', numberInput(layer.light, 0, 100, 0.5, (v) => { layer.light = v; changed(true); }));
     field(row, 'Firm', numberInput(layer.heavy, 0, 100, 0.5, (v) => { layer.heavy = v; changed(true); }));
     panel.append(row);
+    if (Math.max(layer.light, layer.heavy) >= doc.settings.pen_pos_up) {
+      const upHint = document.createElement('p');
+      upHint.className = 'hint error';
+      upHint.textContent = `Light/Firm should be below the pen-up height (${doc.settings.pen_pos_up}) - higher numbers lift the pen, so these would "lower" it upwards.`;
+      panel.append(upHint);
+    }
     if (Math.max(layer.light, layer.heavy) > heightCap()) {
       const capHint = document.createElement('p');
       capHint.className = 'hint error';
@@ -1470,6 +1486,12 @@ function renderLayerProps() {
       : 'Each stroke plots at one height, from how hard you pressed on average.';
     panel.append(hint);
   } else {
+    if (layer.heavy >= doc.settings.pen_pos_up) {
+      const upHint = document.createElement('p');
+      upHint.className = 'hint error';
+      upHint.textContent = `The pen height should be below the pen-up height (${doc.settings.pen_pos_up}).`;
+      panel.append(upHint);
+    }
     field(panel, 'Pen height', numberInput(layer.heavy, 0, 100, 0.5, (v) => { layer.heavy = v; changed(true); }));
   }
 
@@ -1840,7 +1862,7 @@ for (const key of SETTING_KEYS) {
   $(key).addEventListener('input', () => {
     doc.settings[key] = key === 'pen_pos_up' ? Math.min(+$(key).value, heightCap()) : +$(key).value;
     syncSettingInputs(); sendSettings(); scheduleAutosave();
-    if (key === 'speed_pendown') renderLayerProps();
+    if (key === 'speed_pendown' || key === 'pen_pos_up') renderLayerProps();
   });
 }
 $('height-cap').addEventListener('change', () => {
@@ -1928,6 +1950,7 @@ $('stop').addEventListener('click', () => { pending.clear(); api('stop'); needsF
 $('home').addEventListener('click', () => api('home'));
 $('pen-down').addEventListener('click', () => {
   if (+$('test-height').value > heightCap()) { $('test-height').value = heightCap(); notice(`Test height capped at ${heightCap()}, the highest safe height.`); }
+  if (+$('test-height').value >= doc.settings.pen_pos_up) notice(`Test height ${$('test-height').value} isn't below the pen-up height (${doc.settings.pen_pos_up}), so "down" won't be lower than up.`);
   if (requireConnection()) api('pen', { down: true, height: +$('test-height').value });
 });
 $('pen-up').addEventListener('click', () => api('pen', { down: false }));

@@ -224,13 +224,33 @@ server.py                   the plotter bridge
 tools/axidraw_calibration.py   a pressure calibration sheet (SVG)
 ```
 
+## Safety
+
+- The server only listens on your own computer, and its API only answers the app's own page — other websites open in
+  your browser can't send the plotter commands.
+- If a live stroke stops arriving mid-stroke (the page closed or crashed), the pen is lifted after 3 seconds rather
+  than being left down on the paper.
+- If the AxiDraw is unplugged or its power is switched off, the app notices within a few seconds, stops, and asks you
+  to put the carriage back in the home corner before connecting again.
+- **Highest safe height** caps every pen height the app sends, for the spring kit.
+
 ## Notes
 
 - Following as you draw is slower than plotting whole strokes, as the plotter briefly stops at each point it's sent.
 - On macOS, a browser can start reporting a tablet pen as a mouse after a native drop-down menu is opened, losing
   pressure; the app avoids drop-downs in its drawing controls and warns if it happens.
-- AxiDraw is a trademark of Evil Mad Scientist Laboratories. This project isn't affiliated with or endorsed by Evil Mad
-  Scientist or Bantam Tools.
+
+
+## Acknowledgements
+
+Plotter control uses the [AxiDraw Python API](https://axidraw.com/doc/py_api/) by Windell H. Oskay and
+[Evil Mad Scientist Laboratories](https://www.evilmadscientist.com/) — thank you for making the AxiDraw so open to
+tinkering. The API is licensed separately (GNU GPL v2 or later); it isn't included in this repository, and
+`install.sh` downloads it from Evil Mad Scientist. The pressure behaviour of the spring kit follows their *Brushless
+Servo Motor Use Instructions, Appendix: Spring Kit*.
+
+AxiDraw is a trademark of Evil Mad Scientist Laboratories. This project isn't affiliated with or endorsed by Evil Mad
+Scientist or Bantam Tools.
 
 ## License
 

@@ -44,6 +44,16 @@ DEFAULT_SETTINGS = {
 }
 
 
+LOST_MESSAGE = ("Lost the AxiDraw - unplugged, or its power switched off. Its position is no longer known: "
+                "put the carriage in the home corner, then Connect.")
+
+
+class PlotterLost(Exception):
+    """The plotter disappeared mid-session."""
+
+
+STREAM_TIMEOUT = 3.0  # Seconds without any part of a live stroke before the pen is lifted
+
 def stroke_length(points):
     return sum(math.dist(points[i - 1], points[i]) for i in range(1, len(points)))
 
@@ -74,6 +84,8 @@ class Plotter:
         self.last_error = ""
         self.stroke = None            # The stroke being drawn, while streaming
         self.height_cap = 100         # Highest safe pen height
+        self.stream_activity = 0.0    # When the last piece of a live stroke arrived
+        self.last_check = 0.0         # When the plotter's connection was last checked
         self.backlog_mm = 0.0         # Line sent but not drawn yet
         self.rate_mm_s = None         # Measured drawing pace (pen-down mm per second), smoothed
         threading.Thread(target=self._worker, daemon=True).start()
@@ -170,7 +182,11 @@ class Plotter:
 
     def _worker(self):
         while True:
-            job = self.jobs.get()
+            try:
+                job = self.jobs.get(timeout=0.5)
+            except queue.Empty:
+                self._idle_checks()  # Between jobs: the live-stroke watchdog and the connection check
+                continue
             if job.get("generation", self.cancel_generation) != self.cancel_generation and job["type"] in ("stroke", "begin", "extend", "end"):
                 continue  # Cancelled by stop
             try:
@@ -179,10 +195,15 @@ class Plotter:
                     self.last_error = ""
             except Exception as error:  # Keep the worker alive; report the problem to the app
                 with self.lock:
-                    self.last_error = f"{type(error).__name__}: {error}"
+                    self.last_error = str(error) if isinstance(error, PlotterLost) else f"{type(error).__name__}: {error}"
 
     def _run(self, job):
         kind = job["type"]
+        if kind in ("begin", "extend", "end"):
+            self.stream_activity = time.monotonic()
+        if kind in ("stroke", "begin", "pen", "home") and self.connected and not self.simulate and not self._plotter_present():
+            self._lost_connection()
+            raise PlotterLost(LOST_MESSAGE)
         if kind == "connect":
             self._connect(job.get("simulate", False))
         elif kind == "disconnect":
@@ -214,6 +235,56 @@ class Plotter:
                     self.ad.pendown()
                 else:
                     self.ad.penup()
+
+    # ----- safety checks -----
+
+    def _idle_checks(self):
+        # A live stroke whose pieces stopped arriving (tab closed, browser crashed, connection lost) would leave the
+        # pen down on the paper - lift it. The app sends a heartbeat while the stylus is held still, so this only
+        # happens when the page has really gone.
+        if self.stroke is not None and self.stroke.get("streaming") and time.monotonic() - self.stream_activity > STREAM_TIMEOUT:
+            self._end_stroke()
+            with self.lock:
+                self.last_error = "Lifted the pen: a live stroke stopped arriving (was the page closed or reloaded?)"
+        # Every few seconds, check the plotter is still there and powered
+        if self.connected and not self.simulate and time.monotonic() - self.last_check > 3.0:
+            self.last_check = time.monotonic()
+            if not self._plotter_present():
+                self._lost_connection()
+
+    def _plotter_present(self):
+        """Is the AxiDraw still plugged in, with its motor power on? (The AxiDraw API only logs USB errors, so a
+        pulled cable would otherwise go unnoticed.)"""
+        try:
+            port = self.ad.plot_status.port
+            from serial.tools import list_ports
+            if port is None or not any(p.device == port.port for p in list_ports.comports()):
+                return False
+            from plotink import ebb_motion
+            return bool(ebb_motion.queryVoltage(port, False))
+        except Exception:
+            return True  # If the check itself fails, don't cry wolf
+
+    def _lost_connection(self):
+        """The plotter vanished or lost power: its position is no longer known, so stop and make the user re-home it."""
+        try:
+            if self.ad is not None and self.ad.plot_status.port is not None:
+                self.ad.plot_status.port.close()
+        except Exception:
+            pass
+        self.ad = None
+        self.stroke = None
+        while True:
+            try:
+                self.jobs.get_nowait()
+            except queue.Empty:
+                break
+        with self.lock:
+            self.connected = False
+            self.backlog_mm = 0.0
+            self.cancel_generation += 1
+            self.last_error = LOST_MESSAGE
+        self.resume_event.set()
 
     def _connect(self, simulate):
         self._disconnect()
@@ -295,7 +366,8 @@ class Plotter:
         point = job["points"][0]
         height = self.cap(point[2] if len(point) > 2 else job.get("height", 30))
         speed = int(job.get("speed") or self.settings["speed_pendown"])
-        self.stroke = {"id": job.get("id"), "layer": layer, "height": height, "vary": bool(job.get("vary")), "speed": speed, "last": tuple(point[:2])}
+        self.stroke = {"id": job.get("id"), "layer": layer, "height": height, "vary": bool(job.get("vary")), "speed": speed, "last": tuple(point[:2]),
+                       "streaming": job.get("type") == "begin"}
         if not self.simulate:
             if height != self.current_height or speed != self.ad.options.speed_pendown:
                 self.ad.options.pen_pos_down = height
@@ -386,6 +458,7 @@ class Plotter:
 
 
 PLOTTER = Plotter()
+ALLOWED_HOSTS = set()  # Host headers the API answers to, set from the port in main()
 
 
 def stroke_job(stroke):
@@ -406,7 +479,20 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _allowed(self, post):
+        """Only the app's own page may use the API. Without this, any website open in the browser could send the
+        plotter commands (the server only listens on this computer, but the browser is on it too)."""
+        if self.headers.get("Host", "") not in ALLOWED_HOSTS:
+            return False  # Guards against DNS rebinding
+        origin = self.headers.get("Origin")
+        if origin is not None and origin not in {f"http://{h}" for h in ALLOWED_HOSTS}:
+            return False
+        # A JSON content type can't be sent cross-site without the browser asking first, which this server never allows
+        return not post or self.headers.get("Content-Type", "").split(";")[0].strip() == "application/json"
+
     def do_GET(self):
+        if not self._allowed(post=False):
+            return self._send_json({"error": "Not allowed"}, 403)
         if self.path == "/api/status":
             return self._send_json(PLOTTER.status())
         path = self.path.split("?")[0]
@@ -425,6 +511,8 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def do_POST(self):
+        if not self._allowed(post=True):
+            return self._send_json({"error": "Not allowed"}, 403)
         try:
             length = int(self.headers.get("Content-Length", 0))
             data = json.loads(self.rfile.read(length) or b"{}")
@@ -472,6 +560,7 @@ def main():
     parser.add_argument("--port", type=int, default=8765)
     parser.add_argument("--no-browser", action="store_true", help="don't open the app in the browser")
     args = parser.parse_args()
+    ALLOWED_HOSTS.update({f"127.0.0.1:{args.port}", f"localhost:{args.port}"})
     server = ThreadingHTTPServer(("127.0.0.1", args.port), Handler)
     url = f"http://127.0.0.1:{args.port}"
     print(f"AxiDraw Live running at {url}  (Ctrl+C to stop)")
