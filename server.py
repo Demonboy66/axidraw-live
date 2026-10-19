@@ -19,6 +19,7 @@ import mimetypes
 import os
 import queue
 import threading
+import sys
 import time
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -555,14 +556,34 @@ class Handler(BaseHTTPRequestHandler):
         self._send_json(PLOTTER.status())
 
 
+def already_running(url):
+    """Whether an AxiDraw Live server is already answering at this address."""
+    import urllib.request
+    try:
+        with urllib.request.urlopen(url + "/api/status", timeout=2) as response:
+            return "connected" in json.loads(response.read())
+    except Exception:
+        return False
+
+
 def main():
     parser = argparse.ArgumentParser(description="AxiDraw Live - draw with a tablet, plot as you go.")
     parser.add_argument("--port", type=int, default=8765)
     parser.add_argument("--no-browser", action="store_true", help="don't open the app in the browser")
     args = parser.parse_args()
     ALLOWED_HOSTS.update({f"127.0.0.1:{args.port}", f"localhost:{args.port}"})
-    server = ThreadingHTTPServer(("127.0.0.1", args.port), Handler)
     url = f"http://127.0.0.1:{args.port}"
+    try:
+        server = ThreadingHTTPServer(("127.0.0.1", args.port), Handler)
+    except OSError:
+        # The port is taken - most likely AxiDraw Live is already running, so just open it
+        if already_running(url):
+            print(f"AxiDraw Live is already running at {url} - opening it.")
+            if not args.no_browser:
+                webbrowser.open(url)
+            return
+        print(f"Port {args.port} is in use by another program. Try:  server.py --port {args.port + 1}")
+        sys.exit(1)
     print(f"AxiDraw Live running at {url}  (Ctrl+C to stop)")
     if not args.no_browser:
         webbrowser.open(url)
