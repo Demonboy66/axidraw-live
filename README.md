@@ -83,6 +83,13 @@ With the Eraser selected, its options float at the top-left of the canvas: **Who
 eraser touches (a brush stroke as a group); **Only what it touches** cuts out just the part under the eraser, splitting
 strokes where it crosses them. Set the **width** in millimetres on the paper ([ and ] change it).
 
+### Rulers
+
+Millimetre rulers run along the paper's top and left edges, measured from its top-left corner (the same numbers as the
+position readout), with blue marks showing where the stylus is. Their ticks get finer as you zoom; zoomed in so far
+that an edge is off-screen, the ruler stays at the window's edge; and they turn with the view. **Rulers** (or U) hides
+them.
+
 ### Turning the view
 
 ⟲ / ⟳ in the toolbar (or R / Shift R) turn the view 15° at a time; Space + Option drag turns it freely (add Shift for
@@ -200,7 +207,7 @@ with `+H` (height) and `+S` (speed) codes and `!` pauses where sharpening is due
 
 ### Keys
 
-R / Shift R turn the view 15° · 5 straighten · Space + Option drag turn freely · [ ] eraser size · P pen · E eraser · M move · S shape · Space-drag or middle-drag to pan · pinch / ⌘-scroll to zoom · 0 fit · ⌘Z / ⇧⌘Z undo/redo · ⌘S save
+U rulers · R / Shift R turn the view 15° · 5 straighten · Space + Option drag turn freely · [ ] eraser size · P pen · E eraser · M move · S shape · Space-drag or middle-drag to pan · pinch / ⌘-scroll to zoom · 0 fit · ⌘Z / ⇧⌘Z undo/redo · ⌘S save
 
 ## How it works
 

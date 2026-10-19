@@ -457,6 +457,80 @@ function drawStroke(c, layer, stroke) {
   c.globalAlpha = 1;
 }
 
+// Rulers along the paper's top and left edges, in millimetres from its top-left corner (as the position readout).
+// They turn with the view; when zoomed in so far that an edge is off-screen, that ruler stays at the window's edge.
+let showRulers = true;
+const RULER = 18; // Ruler width, screen pixels
+function drawRulers() {
+  if (!showRulers) return;
+  const W = canvas.clientWidth, H = canvas.clientHeight;
+  const { w, h } = doc.paper;
+  const unit = (x, y) => { const d = Math.hypot(x, y) || 1; return [x / d, y / d]; };
+  const pxPerMm = view.scale;
+  // Tick spacing: the smallest step at least 6 px apart; labels at least 45 px apart
+  const steps = [0.1, 0.2, 0.5, 1, 2, 5, 10, 20, 50, 100, 200];
+  const minor = steps.find((st) => st * pxPerMm >= 6) || 200;
+  const label = steps.find((st) => st * pxPerMm >= 45 && st >= minor) || 200;
+  const multiple = (v, st) => Math.abs(v / st - Math.round(v / st)) < 1e-6;
+  const fmt = (v) => (label < 1 ? v.toFixed(1) : String(Math.round(v)));
+  const straight = view.rot === 0;
+  const hoverPaper = hover ? screenToPaper(...hover) : null;
+
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.font = '10px -apple-system, sans-serif';
+  ctx.lineWidth = 1;
+  // axis: 'x' (top ruler, along the paper's width) or 'y' (left ruler, along its height)
+  for (const axis of ['x', 'y']) {
+    const length = axis === 'x' ? w : h;
+    // The ruler's edge line in paper mm: on the paper edge, or pulled in to stay on screen
+    let at = 0;
+    if (straight) {
+      const edge = paperToScreen(0, 0)[axis === 'x' ? 1 : 0];
+      if (edge < RULER) at = axis === 'x' ? screenToPaper(0, RULER)[1] : screenToPaper(RULER, 0)[0];
+    }
+    const point = (v) => paperToScreen(axis === 'x' ? v : at, axis === 'x' ? at : v);
+    const inward = unit(...rotated(axis === 'x' ? 0 : 1, axis === 'x' ? 1 : 0)); // Towards the paper, on screen
+    const along = unit(...rotated(axis === 'x' ? 1 : 0, axis === 'x' ? 0 : 1));
+    // The strip
+    const [ax, ay] = point(0), [bx, by] = point(length);
+    ctx.fillStyle = '#202328e6';
+    ctx.beginPath();
+    ctx.moveTo(ax, ay); ctx.lineTo(bx, by);
+    ctx.lineTo(bx - inward[0] * RULER, by - inward[1] * RULER); ctx.lineTo(ax - inward[0] * RULER, ay - inward[1] * RULER);
+    ctx.closePath(); ctx.fill();
+    // Ticks hang from the paper side; numbers sit in the outer part of the strip
+    ctx.strokeStyle = '#9aa0aa';
+    ctx.fillStyle = '#c3c8d0';
+    ctx.beginPath();
+    for (let i = 0, v = 0; v <= length + 1e-9; i++, v = i * minor) {
+      const [sx, sy] = point(v);
+      if (sx < -20 || sy < -20 || sx > W + 20 || sy > H + 20) continue;
+      const len = multiple(v, label) ? 10 : multiple(v, label / 2) ? 6 : 3;
+      ctx.moveTo(sx, sy); ctx.lineTo(sx - inward[0] * len, sy - inward[1] * len);
+      if (multiple(v, label)) {
+        ctx.save();
+        ctx.translate(sx - inward[0] * (RULER - 3) + along[0] * 2, sy - inward[1] * (RULER - 3) + along[1] * 2);
+        ctx.rotate(Math.atan2(along[1], along[0]));
+        ctx.textBaseline = 'top';
+        ctx.fillText(fmt(v), 0, axis === 'x' ? 0 : -10);
+        ctx.restore();
+      }
+    }
+    ctx.stroke();
+    // Where the stylus is
+    if (hoverPaper) {
+      const v = axis === 'x' ? hoverPaper[0] : hoverPaper[1];
+      if (v >= 0 && v <= length) {
+        const [sx, sy] = point(v);
+        ctx.strokeStyle = '#5ea2ff';
+        ctx.lineWidth = 1.5;
+        ctx.beginPath(); ctx.moveTo(sx, sy); ctx.lineTo(sx - inward[0] * RULER, sy - inward[1] * RULER); ctx.stroke();
+        ctx.lineWidth = 1;
+      }
+    }
+  }
+}
+
 // While smoothing, the string between the stylus and where the line is being pulled to
 function drawSmoothingString() {
   if (!drawing || !drawing.cursor || !drawing.lazy || drawing.shape) return;
@@ -632,6 +706,7 @@ function render() {
     ctx.beginPath(); ctx.arc(x, y, s * 0.55, 0, Math.PI * 2); ctx.stroke();
   }
 
+  drawRulers();
   drawSmoothingString();
   drawBrushCursor();
   drawPaceRing();
@@ -1187,6 +1262,7 @@ window.addEventListener('keydown', (e) => {
   else if (e.key === '5') setViewRotation(0);
   else if (e.key === '[' || e.key === ']') setEraserWidth(eraserWidth() * (e.key === ']' ? 1.25 : 0.8));
   else if (e.key === 'd') toggleDepthView();
+  else if (e.key === 'u') toggleRulers();
   else if (e.key.startsWith('Arrow')) {
     // Nudge the selected layer 0.5 mm (Shift: 5 mm), in paper directions
     const layer = selectedLayer();
@@ -1904,6 +1980,15 @@ function toggleDepthView() {
   sceneDirty = true;
 }
 $('depth-view').addEventListener('click', toggleDepthView);
+function toggleRulers() {
+  showRulers = !showRulers;
+  $('rulers').classList.toggle('active', showRulers);
+  try { localStorage.setItem('axidraw-live-rulers', showRulers ? '1' : '0'); } catch (error) { /* Not saved */ }
+  needsFrame = true;
+}
+try { showRulers = localStorage.getItem('axidraw-live-rulers') !== '0'; } catch (error) { /* Default: shown */ }
+$('rulers').classList.toggle('active', showRulers);
+$('rulers').addEventListener('click', toggleRulers);
 function setEraserWidth(mm) {
   doc.eraserWidth = Math.round(clamp(mm, 0.5, 50) * 10) / 10;
   $('eraser-width').value = doc.eraserWidth;
