@@ -1597,7 +1597,7 @@ function renderBrushProps(panel, layer) {
     mm('Step, firm', 'circlePitchFirm', 0.05, 20, 0.05);
     note('How far each loop moves on - pressing harder overlaps them more.');
   } else if (b.type === 'rake') {
-    count('Lines', 'tines', 2, 12);
+    count('Lines', 'tines', 2, 30);
     mm('Spacing', 'tineSpacing', 0.1, 20, 0.1, 'mm (doubles at full pressure)');
   } else if (b.type === 'sketchy') {
     count('Lines', 'sketchLines', 1, 5);
