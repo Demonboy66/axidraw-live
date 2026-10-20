@@ -642,6 +642,7 @@ function renderBase() {
 }
 
 function render() {
+  if (!base.width || !base.height) return; // Hidden or minimised: nothing to draw into
   if (sceneDirty) renderBase();
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.drawImage(base, 0, 0);
@@ -768,8 +769,11 @@ function drawPaceRing() {
 }
 
 function frame() {
-  if (needsFrame || sceneDirty) { needsFrame = false; render(); }
+  // The next frame is booked first, so one failed redraw can never stop the screen updating for good
   requestAnimationFrame(frame);
+  if (!(needsFrame || sceneDirty)) return;
+  needsFrame = false;
+  try { render(); } catch (error) { console.error(error); }
 }
 
 // ---------- Input ----------
@@ -831,6 +835,8 @@ canvas.addEventListener('pointerdown', (e) => {
   if (e.pointerType === 'pen') penSeen = true;
   if (e.pointerType === 'touch' && penSeen) return; // Palm rejection
   e.preventDefault(); // No text selection or dragging while the pen moves over the panels
+  // Drawing on the canvas takes the keyboard focus away from any box or button, so shortcuts and Space work
+  if (document.activeElement && document.activeElement !== document.body) document.activeElement.blur();
   try { canvas.setPointerCapture(e.pointerId); } catch (error) { /* Synthetic events have no pointer to capture */ }
   const pos = eventPos(e);
   if ((e.button === 1 || spaceDown) && e.altKey) {
@@ -1263,6 +1269,14 @@ canvas.addEventListener('wheel', (e) => {
 }, { passive: false });
 
 window.addEventListener('keydown', (e) => {
+  // Space pans from anywhere except a box you type words into; a number box or button that kept the focus
+  // (say, after setting the eraser width) gives it up instead of eating the Space
+  if (e.key === ' ' && e.target.matches && !e.target.matches('input[type=text], textarea')) {
+    if (e.target !== document.body && e.target.blur) e.target.blur();
+    if (!e.repeat) { spaceDown = true; canvas.className = 'pan'; }
+    e.preventDefault();
+    return;
+  }
   if (e.target.matches && e.target.matches('input, select, textarea')) return;
   const cmd = e.metaKey || e.ctrlKey;
   if (cmd && e.key.toLowerCase() === 'z') { e.preventDefault(); e.shiftKey ? redo() : undo(); }
@@ -1298,6 +1312,8 @@ window.addEventListener('keydown', (e) => {
   else if (e.key === '-') zoomBy(1 / 1.5, ...(hover || []));
 });
 window.addEventListener('keyup', (e) => { if (e.key === ' ') { spaceDown = false; setTool(tool); } });
+// If the window loses focus with Space held (switching apps), its key-up never arrives - don't stay stuck panning
+window.addEventListener('blur', () => { if (spaceDown) { spaceDown = false; setTool(tool); } });
 
 // ---------- Panels ----------
 
