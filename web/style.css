@@ -122,3 +122,11 @@ button.primary { background: var(--accent); border-color: var(--accent); color: 
 
 .input-kind { padding: 0 5px; border-radius: 3px; background: var(--panel-2); color: var(--text); }
 .input-kind.no-pressure { background: #6b2522; color: #ffd0cc; }
+
+/* Side panels: always-visible scrollbars (macOS hides them until you scroll, leaving a pen nothing to grab) */
+#left, #right { scrollbar-gutter: stable; }
+#left::-webkit-scrollbar, #right::-webkit-scrollbar { width: 10px; }
+#left::-webkit-scrollbar-track, #right::-webkit-scrollbar-track { background: var(--panel); }
+#left::-webkit-scrollbar-thumb, #right::-webkit-scrollbar-thumb { background: #4a505a; border-radius: 5px; border: 2px solid var(--panel); }
+#left::-webkit-scrollbar-thumb:hover, #right::-webkit-scrollbar-thumb:hover { background: #5d6470; }
+#left.drag-scrolling, #right.drag-scrolling { cursor: grabbing; }

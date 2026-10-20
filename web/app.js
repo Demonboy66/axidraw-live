@@ -1295,6 +1295,30 @@ window.addEventListener('keyup', (e) => { if (e.key === ' ') { spaceDown = false
 
 // ---------- Panels ----------
 
+// A pen (or finger) can drag the side panels up and down like a phone screen, starting on any empty part of a panel.
+// Pens don't send scroll gestures, so without this the lower controls were out of reach.
+for (const panel of [$('left'), $('right')]) {
+  let drag = null;
+  panel.addEventListener('pointerdown', (e) => {
+    if (e.pointerType === 'mouse' || e.target.closest('input, select, button, textarea, a, .choices')) return;
+    drag = { id: e.pointerId, y: e.clientY, top: panel.scrollTop, moved: false };
+  });
+  panel.addEventListener('pointermove', (e) => {
+    if (!drag || e.pointerId !== drag.id) return;
+    const dy = e.clientY - drag.y;
+    if (!drag.moved && Math.abs(dy) < 4) return; // A tap stays a tap
+    if (!drag.moved) {
+      drag.moved = true;
+      panel.classList.add('drag-scrolling');
+      try { panel.setPointerCapture(e.pointerId); } catch (error) { /* Synthetic events */ }
+    }
+    panel.scrollTop = drag.top - dy;
+  });
+  const end = () => { drag = null; panel.classList.remove('drag-scrolling'); };
+  panel.addEventListener('pointerup', end);
+  panel.addEventListener('pointercancel', end);
+}
+
 function changed(structure) {
   if (structure && tool === 'shape') syncShapeBrushChoice();
   sceneDirty = true;
