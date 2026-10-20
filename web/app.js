@@ -230,6 +230,12 @@ function onStatus(data) {
   const conn = $('connection');
   conn.textContent = data.connected ? (data.simulate ? 'Simulating (the plotter stays still)' : 'Connected to the AxiDraw') : 'Not connected';
   conn.classList.toggle('ok', !!data.connected);
+  if (data.connected && data.position) {
+    const [px, py] = data.position;
+    $('pen-position').textContent = `Pen at ${px.toFixed(1)}, ${py.toFixed(1)} mm from home - ${(px - doc.paper.x).toFixed(1)}, ${(py - doc.paper.y).toFixed(1)} on the paper`;
+  } else {
+    $('pen-position').textContent = 'Connect to move the pen.';
+  }
   $('status-queue').textContent = data.connected ? `Queue: ${data.queued}${data.paused ? ' (paused)' : ''}` : '';
   const lag = lagSeconds();
   $('status-lag').textContent = data.connected && lag >= 0.3 ? `Plotter ${lag.toFixed(1)} s behind (${Math.round(data.backlogMm)} mm to draw)` : '';
@@ -1969,6 +1975,58 @@ $('disconnect').addEventListener('click', () => { pending.clear(); api('disconne
 $('plot-layers').addEventListener('click', () => plotLayers(doc.layers.filter((l) => l.kind === 'draw' && l.plot)));
 $('plot-current').addEventListener('click', () => plotLayers([selectedLayer()]));
 $('pause').addEventListener('click', () => api('pause'));
+
+// ---------- Moving the pen by hand ----------
+let jogStep = 1;
+document.querySelectorAll('#jog-steps button').forEach((b) => b.addEventListener('click', () => {
+  jogStep = +b.dataset.step;
+  document.querySelectorAll('#jog-steps button').forEach((x) => x.classList.toggle('active', x === b));
+}));
+// Hand moves wait for nothing: refuse them while a plot is running rather than slotting them into it
+function plotterFree() {
+  if (!requireConnection()) return false;
+  // Busy means strokes still to draw - not other hand moves, which simply queue up in order
+  if ((status.backlogMm || 0) > 0.01 || pending.size > 0 || status.paused) { notice('Wait for the plot to finish (or Stop it) before moving the pen by hand.'); return false; }
+  return true;
+}
+document.querySelectorAll('[data-jog]').forEach((b) => b.addEventListener('click', () => {
+  if (!plotterFree()) return;
+  const [dx, dy] = b.dataset.jog.split(',').map(Number);
+  sendInOrder('jog', { dx: dx * jogStep, dy: dy * jogStep });
+}));
+$('jog-home').addEventListener('click', () => { if (plotterFree()) sendInOrder('home', {}); });
+
+$('paper-corner-here').addEventListener('click', () => {
+  if (!requireConnection()) return;
+  const [x, y] = status.position || [0, 0];
+  const before = `${doc.paper.x}, ${doc.paper.y}`;
+  doc.paper.x = +x.toFixed(2);
+  doc.paper.y = +y.toFixed(2);
+  syncPaperInputs();
+  changed(false);
+  notice(`Paper at X/Y set to ${doc.paper.x}, ${doc.paper.y} mm (was ${before}).`, 8000);
+});
+
+// Trace the drawing's outline (or the margin) with the pen up, to check where it will land
+$('frame').addEventListener('click', () => {
+  if (!plotterFree()) return;
+  const m = placementMatrix();
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (const layer of doc.layers) {
+    if (layer.kind !== 'draw' || !layer.plot) continue;
+    for (const stroke of layer.strokes) for (const piece of strokeToPlot(layer, stroke, m)) for (const [x, y] of piece) {
+      x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x); y1 = Math.max(y1, y);
+    }
+  }
+  let what = 'the drawing';
+  if (x0 === Infinity) {
+    const r = marginRect();
+    [x0, y0, x1, y1] = [r.x0 + doc.paper.x, r.y0 + doc.paper.y, r.x1 + doc.paper.x, r.y1 + doc.paper.y];
+    what = 'the margin (nothing to plot yet)';
+  }
+  sendInOrder('frame', { points: [[x0, y0], [x1, y0], [x1, y1], [x0, y1], [x0, y0]] });
+  notice(`Framing ${what}: ${(x1 - x0).toFixed(1)} × ${(y1 - y0).toFixed(1)} mm, pen raised.`);
+});
 $('resume').addEventListener('click', () => api('resume'));
 $('stop').addEventListener('click', () => { pending.clear(); api('stop'); needsFrame = true; });
 $('home').addEventListener('click', () => api('home'));

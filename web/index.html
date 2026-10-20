@@ -105,6 +105,27 @@
   </section>
 
   <section>
+    <h2>Move the Pen</h2>
+    <div id="pen-position" class="hint">Connect to move the pen.</div>
+    <div class="row jog-row">
+      <div class="jog-pad" title="Moves the pen (raised) by the step size - directions as on the paper, unrotated">
+        <span></span><button data-jog="0,-1" title="Towards the back">▲</button><span></span>
+        <button data-jog="-1,0" title="Left">◀</button><button id="jog-home" title="Home">⌂</button><button data-jog="1,0" title="Right">▶</button>
+        <span></span><button data-jog="0,1" title="Towards the front">▼</button><span></span>
+      </div>
+      <div class="choices" id="jog-steps">
+        <button data-step="0.1">0.1 mm</button>
+        <button data-step="1" class="active">1 mm</button>
+        <button data-step="10">10 mm</button>
+      </div>
+    </div>
+    <div class="row">
+      <button id="paper-corner-here" title="Sets Paper at X/Y to where the pen is now - jog the tip over the paper's top-left corner first">Paper corner is here</button>
+      <button id="frame" title="Traces the outline of the drawing (or the margin, if there's nothing drawn) with the pen raised">Frame</button>
+    </div>
+  </section>
+
+  <section>
     <h2>Speed &amp; Pen</h2>
     <label title="Inkscape's Writing/drawing speed. Layers use this unless given their own.">Writing/drawing speed <span class="value" data-for="speed_pendown"></span><input type="range" id="speed_pendown" min="1" max="100"></label>
     <label title="Inkscape's Pen-up movement speed">Pen-up movement speed <span class="value" data-for="speed_penup"></span><input type="range" id="speed_penup" min="1" max="100"></label>

@@ -130,3 +130,8 @@ button.primary { background: var(--accent); border-color: var(--accent); color: 
 #left::-webkit-scrollbar-thumb, #right::-webkit-scrollbar-thumb { background: #4a505a; border-radius: 5px; border: 2px solid var(--panel); }
 #left::-webkit-scrollbar-thumb:hover, #right::-webkit-scrollbar-thumb:hover { background: #5d6470; }
 #left.drag-scrolling, #right.drag-scrolling { cursor: grabbing; }
+
+.jog-row { align-items: flex-start; gap: 10px; }
+.jog-pad { display: grid; grid-template-columns: repeat(3, 30px); grid-auto-rows: 28px; gap: 3px; }
+.jog-pad button { padding: 0; }
+#jog-steps { flex-direction: column; }

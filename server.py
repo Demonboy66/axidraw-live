@@ -202,7 +202,7 @@ class Plotter:
         kind = job["type"]
         if kind in ("begin", "extend", "end"):
             self.stream_activity = time.monotonic()
-        if kind in ("stroke", "begin", "pen", "home") and self.connected and not self.simulate and not self._plotter_present():
+        if kind in ("stroke", "begin", "pen", "home", "jog", "frame") and self.connected and not self.simulate and not self._plotter_present():
             self._lost_connection()
             raise PlotterLost(LOST_MESSAGE)
         if kind == "connect":
@@ -216,6 +216,14 @@ class Plotter:
                 self.ad.penup()
         elif kind == "home":
             self._move_to(0.0, 0.0)
+        elif kind == "jog":
+            # Pen up, then a step from where the pen is
+            x, y = self.position
+            self._move_to(x + float(job.get("dx", 0)), y + float(job.get("dy", 0)))
+        elif kind == "frame":
+            # Trace an outline with the pen up, to show where a drawing will land
+            for point in job.get("points", []):
+                self._move_to(float(point[0]), float(point[1]))
         elif kind == "stroke":
             self._plot_stroke(job)
         elif kind == "begin":
@@ -294,6 +302,7 @@ class Plotter:
         if simulate:
             with self.lock:
                 self.connected = True
+                self.position = (0.0, 0.0)  # As with the real plotter: wherever it is on connecting counts as home
             return
         from pyaxidraw import axidraw  # Imported here so simulate mode works without a plotter attached
         ad = axidraw.AxiDraw()
@@ -333,10 +342,16 @@ class Plotter:
         self.applied = dict(self.settings)
 
     def _move_to(self, x, y):
-        if self.connected and not self.simulate:
+        """A pen-up move. The AxiDraw stops at the edges of its travel, so the position is read back afterwards."""
+        if not self.connected:
+            raise RuntimeError("Not connected - choose Connect or Simulate first")
+        if self.simulate:
+            x, y = max(0.0, x), max(0.0, y)
+        else:
             self.ad.moveto(x, y)
+            x, y = self.ad.current_pos()
         with self.lock:
-            self.position = (x, y)
+            self.position = (round(x, 3), round(y, 3))
 
     def _servo_command(self, height):
         """Moves the pen servo to a pen-down height right away, without pausing the motion - for pressure changes mid-stroke."""
@@ -548,6 +563,10 @@ class Handler(BaseHTTPRequestHandler):
             PLOTTER.stop()
         elif route == "/api/home":
             PLOTTER.submit({"type": "home"})
+        elif route == "/api/jog":
+            PLOTTER.submit({"type": "jog", "dx": float(data.get("dx", 0)), "dy": float(data.get("dy", 0))})
+        elif route == "/api/frame":
+            PLOTTER.submit({"type": "frame", "points": [[float(x), float(y)] for x, y in data.get("points", [])][:1000]})
         elif route == "/api/reset_sharpen":
             with PLOTTER.lock:
                 PLOTTER.length_since_sharpen.pop(str(data.get("layer")), None)

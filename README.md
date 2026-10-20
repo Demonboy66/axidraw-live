@@ -159,6 +159,16 @@ what will plot. "Follow as I draw" uses the plain pen — brush strokes plot whe
 - **Home position:** the AxiDraw can't sense where it is — when you **Connect**, wherever the carriage sits counts as
   home (0, 0). Put it in the home corner before connecting; **Disconnect** returns it home and releases the motors.
 
+### Moving the pen by hand
+
+**Move the Pen** (left panel) jogs the raised pen in steps of 0.1, 1 or 10 mm, with a readout of where it is — from
+home and on the paper. Hand moves wait while a plot is running.
+
+- **Paper corner is here:** jog the tip over the paper's top-left corner, then click it — Paper at X/Y is set to the
+  pen's position, so the drawing lines up with the sheet exactly.
+- **Frame:** traces the outline of everything set to plot (or the margin, if nothing is drawn) with the pen raised,
+  like a laser cutter's framing — a quick check that the drawing lands where you expect.
+
 ### Plot order
 
 - **Plot later:** layer by layer, bottom of the list first (so upper layers go on top). Within a layer, with
