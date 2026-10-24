@@ -196,7 +196,10 @@
         <option value="whole">Whole strokes</option>
         <option value="part">Only what it touches</option>
       </select>
-      <label class="inline">width <input type="number" id="eraser-width" min="0.5" max="50" step="0.5" value="4"> mm</label>
+      <span id="eraser-shape"></span>
+      <label class="inline" id="eraser-width-label">width <input type="number" id="eraser-width" min="0.5" max="50" step="0.5" value="4"></label>
+      <label class="inline" id="eraser-height-label" hidden>H <input type="number" id="eraser-height" min="0.5" max="50" step="0.5" value="4"></label>
+      <span>mm</span>
     </span>
     <span id="shape-options" hidden>
       <select id="shape-kind">

@@ -39,6 +39,8 @@ function newDocument() {
     smoothing: 0,
     speedFollowsSetting: true,
     eraserWidth: 4,
+    eraserHeight: 4,
+    eraserShape: 'circle', // 'circle' or 'rect'
     eraserMode: 'whole', // 'whole' strokes, or 'part' - only what's under the eraser
   };
 }
@@ -725,7 +727,12 @@ function render() {
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.strokeStyle = '#e5675f';
     ctx.lineWidth = 1;
-    ctx.beginPath(); ctx.arc(hover[0], hover[1], Math.max(2, eraserWidth() / 2 * view.scale), 0, Math.PI * 2); ctx.stroke();
+    if (doc.eraserShape === 'rect') {
+      const w = Math.max(3, eraserWidth() * view.scale), h = Math.max(3, eraserHeight() * view.scale);
+      ctx.strokeRect(hover[0] - w / 2, hover[1] - h / 2, w, h);
+    } else {
+      ctx.beginPath(); ctx.arc(hover[0], hover[1], Math.max(2, eraserWidth() / 2 * view.scale), 0, Math.PI * 2); ctx.stroke();
+    }
   }
 }
 
@@ -787,7 +794,8 @@ let lastPressure = 0;  // {layer, last screen position} while the pen tool is pr
 let hover = null;
 let spaceDown = false;
 let penSeen = false;
-const eraserWidth = () => doc.eraserWidth || 4; // mm on the paper
+const eraserWidth = () => doc.eraserWidth || 4;   // mm on the paper (the circle's diameter, or the rectangle's width)
+const eraserHeight = () => doc.eraserHeight || 4; // mm on the paper (the rectangle's height)
 const STREAM_FLUSH_MS = 40;
 const STREAM_STEP_MM = 1.0;
 
@@ -1195,24 +1203,67 @@ function streamProgress(d, final) {
 
 // The parts of a polyline outside a circle, as pieces (pressure carried along), or null if the circle misses it.
 // Leaves the original untouched, so undo still has it.
-function cutCircle(pts, cx, cy, r) {
+// The eraser's shape at a screen position, in drawing mm: a circle, or a rectangle square to the screen (so it erases
+// exactly the box you see, however the view or drawing is turned). It tells whether a point is inside, and which
+// stretch of a segment a-b lies inside ([t0, t1] as fractions along it), or null if the segment misses.
+function eraserShape(pos) {
+  const [cx, cy] = toDrawing(...pos);
+  const k = 1 / placementScale();
+  if (doc.eraserShape === 'rect') {
+    // The screen's axes, as directions in drawing space
+    const unit = (v) => { const d = Math.hypot(v[0], v[1]) || 1; return [v[0] / d, v[1] / d]; };
+    const right = toDrawing(pos[0] + 1, pos[1]), down = toDrawing(pos[0], pos[1] + 1);
+    const ux = unit([right[0] - cx, right[1] - cy]), uy = unit([down[0] - cx, down[1] - cy]);
+    const hx = (eraserWidth() / 2) * k, hy = (eraserHeight() / 2) * k;
+    const local = (q) => [(q[0] - cx) * ux[0] + (q[1] - cy) * ux[1], (q[0] - cx) * uy[0] + (q[1] - cy) * uy[1]];
+    return {
+      inside: (q) => { const [u, v] = local(q); return Math.abs(u) < hx && Math.abs(v) < hy; },
+      interval: (a, b) => {
+        // Liang-Barsky clipping against the box, in its own axes
+        const [ax, ay] = local(a), [bx, by] = local(b), dx = bx - ax, dy = by - ay;
+        let t0 = 0, t1 = 1;
+        for (const [p, q] of [[-dx, ax + hx], [dx, hx - ax], [-dy, ay + hy], [dy, hy - ay]]) {
+          if (p === 0) { if (q < 0) return null; continue; }
+          const t = q / p;
+          if (p < 0) t0 = Math.max(t0, t); else t1 = Math.min(t1, t);
+          if (t0 > t1) return null;
+        }
+        return t1 - t0 > 1e-9 ? [t0, t1] : null;
+      },
+    };
+  }
+  const r = (eraserWidth() / 2) * k;
+  return {
+    inside: (q) => (q[0] - cx) ** 2 + (q[1] - cy) ** 2 < r * r,
+    interval: (a, b) => {
+      const dx = b[0] - a[0], dy = b[1] - a[1], fx = a[0] - cx, fy = a[1] - cy;
+      const qa = dx * dx + dy * dy, qb = 2 * (fx * dx + fy * dy), qc = fx * fx + fy * fy - r * r;
+      const disc = qb * qb - 4 * qa * qc;
+      if (qa === 0 || disc <= 0) return null;
+      const t0 = (-qb - Math.sqrt(disc)) / (2 * qa), t1 = (-qb + Math.sqrt(disc)) / (2 * qa);
+      return t1 <= 0 || t0 >= 1 ? null : [Math.max(0, t0), Math.min(1, t1)];
+    },
+  };
+}
+
+const eraserTouches = (shape, pts) => pts.some((q, i) => shape.inside(q) || (i + 1 < pts.length && shape.interval(q, pts[i + 1])));
+
+// The parts of a polyline outside the eraser, as pieces (pressure carried along), or null if the eraser misses it.
+// Leaves the original untouched, so undo still has it.
+function cutAway(pts, shape) {
   const at = (a, b, t) => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
-  const inside = (q) => (q[0] - cx) ** 2 + (q[1] - cy) ** 2 < r * r;
   const pieces = [];
-  let current = inside(pts[0]) ? [] : [pts[0]];
-  let touched = inside(pts[0]);
+  let current = shape.inside(pts[0]) ? [] : [pts[0]];
+  let touched = shape.inside(pts[0]);
   for (let i = 0; i + 1 < pts.length; i++) {
     const a = pts[i], b = pts[i + 1];
-    const dx = b[0] - a[0], dy = b[1] - a[1], fx = a[0] - cx, fy = a[1] - cy;
-    const qa = dx * dx + dy * dy, qb = 2 * (fx * dx + fy * dy), qc = fx * fx + fy * fy - r * r;
-    const disc = qb * qb - 4 * qa * qc;
-    if (qa === 0 || disc <= 0) { if (!inside(b)) current.push(b); continue; }
-    const t1 = (-qb - Math.sqrt(disc)) / (2 * qa), t2 = (-qb + Math.sqrt(disc)) / (2 * qa);
-    if (t2 <= 0 || t1 >= 1) { current.push(b); continue; } // Passes by
+    const span = shape.interval(a, b);
+    if (!span) { if (!shape.inside(b)) current.push(b); continue; } // Passes by
     touched = true;
-    if (t1 > 0) current.push(at(a, b, t1));               // Runs into the circle: end this piece at its edge
+    const [t0, t1] = span;
+    if (t0 > 0) current.push(at(a, b, t0));               // Runs into the eraser: end this piece at its edge
     if (current.length > 1) pieces.push(current);
-    current = t2 < 1 ? [at(a, b, t2), b] : [];            // Comes out again: start a new piece at the edge
+    current = t1 < 1 ? [at(a, b, t1), b] : [];            // Comes out again: start a new piece at the edge
   }
   if (current.length > 1) pieces.push(current);
   if (!touched) return null;
@@ -1223,23 +1274,13 @@ function cutCircle(pts, cx, cy, r) {
 function eraseAt(pos) {
   const layer = selectedLayer();
   if (!canDrawOn(layer) || !onCanvas(pos)) return;
-  const [x, y] = toDrawing(...pos);
-  const r = eraserWidth() / 2 / placementScale();
-  const near = (pts) => {
-    for (let i = 0; i < pts.length; i++) {
-      const a = pts[i], b = pts[i + 1] || a;
-      const dx = b[0] - a[0], dy = b[1] - a[1];
-      const t = clamp(((x - a[0]) * dx + (y - a[1]) * dy) / (dx * dx + dy * dy || 1), 0, 1);
-      if (Math.hypot(a[0] + t * dx - x, a[1] + t * dy - y) <= r) return true;
-    }
-    return false;
-  };
+  const shape = eraserShape(pos);
   if (doc.eraserMode === 'part') {
     // Only what's under the eraser: cut it out, splitting strokes where it crosses them
     let changedAny = false;
     const kept = [];
     for (const st of layer.strokes) {
-      const pieces = near(st.pts) ? cutCircle(st.pts, x, y, r) : null;
+      const pieces = cutAway(st.pts, shape);
       if (!pieces) { kept.push(st); continue; }
       changedAny = true;
       pieces.forEach((pts, i) => kept.push({ ...st, id: pieces.length > 1 ? `${st.id}~${i}${newId('')}` : `${st.id}~${newId('')}`, pts }));
@@ -1250,7 +1291,7 @@ function eraseAt(pos) {
   const before = layer.strokes.length;
   // Touching any line of a brush stroke removes the whole stroke
   const hit = new Set();
-  for (const st of layer.strokes) if (near(st.pts)) hit.add(st.group || st.id);
+  for (const st of layer.strokes) if (eraserTouches(shape, st.pts)) hit.add(st.group || st.id);
   if (hit.size) layer.strokes = layer.strokes.filter((st) => !hit.has(st.group || st.id));
   if (layer.strokes.length !== before) { sceneDirty = true; renderLayers(); }
 }
@@ -1290,7 +1331,11 @@ window.addEventListener('keydown', (e) => {
   else if (e.key === 'r') rotateView(Math.PI / 12);
   else if (e.key === 'R') rotateView(-Math.PI / 12);
   else if (e.key === '5') setViewRotation(0);
-  else if (e.key === '[' || e.key === ']') setEraserWidth(eraserWidth() * (e.key === ']' ? 1.25 : 0.8));
+  else if (e.key === '[' || e.key === ']') {
+    const k = e.key === ']' ? 1.25 : 0.8;
+    setEraserWidth(eraserWidth() * k);
+    if (doc.eraserShape === 'rect') setEraserHeight(eraserHeight() * k);
+  }
   else if (e.key === 'd') toggleDepthView();
   else if (e.key === 'u') toggleRulers();
   else if (e.key.startsWith('Arrow')) {
@@ -2110,6 +2155,27 @@ function toggleRulers() {
 try { showRulers = localStorage.getItem('axidraw-live-rulers') !== '0'; } catch (error) { /* Default: shown */ }
 $('rulers').classList.toggle('active', showRulers);
 $('rulers').addEventListener('click', toggleRulers);
+function setEraserHeight(mm) {
+  doc.eraserHeight = Math.round(clamp(mm, 0.5, 50) * 10) / 10;
+  $('eraser-height').value = doc.eraserHeight;
+  needsFrame = true;
+  scheduleAutosave();
+}
+function eraserShapeButtons() {
+  const row = choiceButtons([['circle', 'Round'], ['rect', 'Rectangle']], doc.eraserShape === 'rect' ? 'rect' : 'circle', (value) => {
+    doc.eraserShape = value;
+    syncEraserShape();
+    needsFrame = true;
+    scheduleAutosave();
+  });
+  row.id = 'eraser-shape';
+  return row;
+}
+function syncEraserShape() {
+  const rect = doc.eraserShape === 'rect';
+  $('eraser-height-label').hidden = !rect;
+  $('eraser-width-label').firstChild.textContent = rect ? 'W ' : 'width ';
+}
 function setEraserWidth(mm) {
   doc.eraserWidth = Math.round(clamp(mm, 0.5, 50) * 10) / 10;
   $('eraser-width').value = doc.eraserWidth;
@@ -2160,9 +2226,13 @@ function eraserModeButtons() {
 }
 $('eraser-mode').replaceWith(eraserModeButtons());
 $('eraser-width').addEventListener('change', () => { const v = parseFloat($('eraser-width').value); setEraserWidth(isNaN(v) ? eraserWidth() : v); });
+$('eraser-height').addEventListener('change', () => { const v = parseFloat($('eraser-height').value); setEraserHeight(isNaN(v) ? eraserHeight() : v); });
 
 function syncSmoothing() {
   $('eraser-width').value = eraserWidth();
+  $('eraser-height').value = eraserHeight();
+  $('eraser-shape').replaceWith(eraserShapeButtons());
+  syncEraserShape();
   $('eraser-mode').replaceWith(eraserModeButtons());
   $('smoothing').value = doc.smoothing || 0;
   $('smoothing-value').textContent = doc.smoothing ? `${doc.smoothing}%` : 'off';

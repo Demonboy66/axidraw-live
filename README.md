@@ -81,7 +81,9 @@ lets go; below that it's constant. A slightly soft surface under the paper widen
 
 With the Eraser selected, its options float at the top-left of the canvas: **Whole strokes** removes anything the
 eraser touches (a brush stroke as a group); **Only what it touches** cuts out just the part under the eraser, splitting
-strokes where it crosses them. Set the **width** in millimetres on the paper ([ and ] change it).
+strokes where it crosses them. The eraser is **Round** (set its width) or a **Rectangle** (set W and H separately) —
+both in millimetres on the paper; [ and ] make it smaller or bigger. The rectangle stays square to the screen, so it
+erases exactly the box you see, even with the view turned.
 
 ### Rulers
 
